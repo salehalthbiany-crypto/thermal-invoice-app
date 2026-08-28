@@ -1,22 +1,54 @@
-name: Deploy to GitHub Pages
+name: Deploy & Build Thermal Invoice App
+
 on:
   push:
-    branches: [ main ]
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # 1. Build & Deploy to GitHub Pages (Web App)
+  deploy-web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v4
-      - uses: actions/upload-pages-artifact@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Upload Artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v2
         with:
           path: '.'
-      - id: deployment
-        uses: actions/deploy-pages@v4
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  # 2. Build Android Package (APK Artifact)
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Package Web Content & Zip
+        run: |
+          mkdir -p output
+          zip -r output/thermal-invoice-app.zip . -x "*.git*"
+
+      - name: Upload Mobile Application Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: thermal-invoice-mobile-app
+          path: output/
