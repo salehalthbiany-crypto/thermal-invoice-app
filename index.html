@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام الفواتير والطباعة الحرارية</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #f0f2f5; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        .tabs { display: flex; gap: 8px; width: 100%; max-width: 720px; margin-bottom: 10px; }
+        .tab-btn { flex: 1; padding: 10px; border: none; background: #e2e8f0; font-weight: bold; border-radius: 8px; cursor: pointer; }
+        .tab-btn.active { background: #10b981; color: white; }
+        .tab-content { display: none; width: 100%; max-width: 720px; }
+        .tab-content.active { display: block; }
+        .container { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); width: 100%; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #edf2f7; }
+        .header input { border: none; border-bottom: 2px solid #10b981; font-size: 1rem; outline: none; font-weight: bold; padding: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th, td { border: 1px solid #cbd5e0; padding: 6px; text-align: center; }
+        th { background: #edf2f7; }
+        input.cell { width: 100%; border: none; outline: none; text-align: center; font-size: 0.85rem; }
+        .btn-del { background: #ef4444; color: white; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+        .btn-add { width: 100%; padding: 8px; background: #10b981; color: white; border: none; border-radius: 8px; margin-top: 10px; font-weight: bold; cursor: pointer; }
+        .totals { border-top: 2px solid #2d3748; margin-top: 10px; padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+        .row-tot { display: flex; justify-content: space-between; font-weight: bold; padding: 4px 8px; background: #f7fafc; }
+        .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .action-btn { flex: 1; min-width: 80px; padding: 8px; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; }
+        .bg-blue { background: #3182ce; } .bg-green { background: #10b981; } .bg-red { background: #ef4444; } .bg-teal { background: #0d9488; }
+        .card-rec { background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; margin-bottom: 8px; }
+        @media print {
+            .tabs, .actions, .btn-add, .btn-del, th:last-child, td:last-child { display: none !important; }
+            body { background: white; padding: 0; }
+            .container { box-shadow: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('inv')">📝 الفاتورة</button>
+        <button class="tab-btn" onclick="switchTab('rec')">📂 السجل (<span id="cnt">0</span>)</button>
+    </div>
+
+    <div class="tab-content active" id="tab-inv">
+        <div class="container" id="inv-card">
+            <div class="header">
+                <div>العميل: <input type="text" id="client" placeholder="اسم العميل"></div>
+                <div id="date"></div>
+            </div>
+            <table>
+                <thead><tr><th>عليه</th><th>التفاصيل</th><th>الرصيد</th><th>حذف</th></tr></thead>
+                <tbody id="tbody"></tbody>
+            </table>
+            <button class="btn-add" onclick="addRow()">➕ إضافة سطر</button>
+            <div style="margin-top:10px;">الواصل: <input type="number" id="received" oninput="calc()" style="padding:4px; border:1px solid #ccc; border-radius:4px;"></div>
+            <div class="totals">
+                <div class="row-tot"><span>إجمالي عليه:</span><span id="tot-debit">0.00</span></div>
+                <div class="row-tot"><span>الصافي المتبقي:</span><span id="net">0.00</span></div>
+            </div>
+        </div>
+        <div class="actions">
+            <button class="action-btn bg-blue" onclick="save(); window.print();">🖨️ طباعة</button>
+            <button class="action-btn bg-green" onclick="save(); alert('تم الحفظ');">💾 حفظ</button>
+            <button class="action-btn bg-teal" onclick="dlImg()">⬇️ صورة</button>
+            <button class="action-btn bg-red" onclick="reset()">🗑️ جديد</button>
+        </div>
+    </div>
+
+    <div class="tab-content" id="tab-rec">
+        <div class="container">
+            <h3>📂 سجل الفواتير</h3>
+            <div id="rec-list" style="margin-top:10px;"></div>
+        </div>
+    </div>
+
+    <script>
+        let curId = null;
+        function switchTab(t) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            if(t==='inv') { event.target.classList.add('active'); document.getElementById('tab-inv').classList.add('active'); }
+            else { event.target.classList.add('active'); document.getElementById('tab-rec').classList.add('active'); renderRecs(); }
+        }
+        function addRow(d='', n='') {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td><input type="number" class="cell debit" value="${d}" oninput="calc()"></td>
+                            <td><input type="text" class="cell note" value="${n}"></td>
+                            <td><input type="text" class="cell bal" readonly value="0.00"></td>
+                            <td><button class="btn-del" onclick="this.closest('tr').remove();calc();">✕</button></td>`;
+            document.getElementById('tbody').appendChild(tr);
+            calc();
+        }
+        function calc() {
+            let run = 0, tot = 0;
+            document.querySelectorAll('#tbody tr').forEach(r => {
+                let d = parseFloat(r.querySelector('.debit').value) || 0;
+                run += d; tot += d;
+                r.querySelector('.bal').value = run.toFixed(2);
+            });
+            let rec = parseFloat(document.getElementById('received').value) || 0;
+            document.getElementById('tot-debit').textContent = tot.toFixed(2);
+            document.getElementById('net').textContent = (tot - rec).toFixed(2);
+        }
+        function save() {
+            let client = document.getElementById('client').value || 'عميل';
+            let recVal = document.getElementById('received').value || 0;
+            let rows = [];
+            document.querySelectorAll('#tbody tr').forEach(r => {
+                rows.push({ debit: r.querySelector('.debit').value, note: r.querySelector('.note').value });
+            });
+            let recs = JSON.parse(localStorage.getItem('my_recs') || '[]');
+            let id = curId || 'INV_' + Date.now();
+            let item = { id, client, recVal, rows, date: new Date().toLocaleDateString('ar-EG') };
+            let idx = recs.findIndex(r => r.id === id);
+            if(idx >= 0) recs[idx] = item; else recs.unshift(item);
+            localStorage.setItem('my_recs', JSON.stringify(recs));
+            curId = id;
+            updCnt();
+        }
+        function renderRecs() {
+            let recs = JSON.parse(localStorage.getItem('my_recs') || '[]');
+            let l = document.getElementById('rec-list');
+            l.innerHTML = recs.length ? '' : 'لا توجد فواتير.';
+            recs.forEach(r => {
+                let d = document.createElement('div');
+                d.className = 'card-rec';
+                d.innerHTML = `<b>👤 ${r.client}</b> | 📅 ${r.date} <br>
+                    <button onclick="loadRec('${r.id}')" style="margin-top:5px; padding:3px 8px;">✏️ عرض/تعديل</button>`;
+                l.appendChild(d);
+            });
+        }
+        function loadRec(id) {
+            let recs = JSON.parse(localStorage.getItem('my_recs') || '[]');
+            let r = recs.find(x => x.id === id);
+            if(!r) return;
+            curId = r.id;
+            document.getElementById('client').value = r.client;
+            document.getElementById('received').value = r.recVal;
+            document.getElementById('tbody').innerHTML = '';
+            r.rows.forEach(x => addRow(x.debit, x.note));
+            switchTab('inv');
+        }
+        function reset() {
+            curId = null;
+            document.getElementById('client').value = '';
+            document.getElementById('received').value = '';
+            document.getElementById('tbody').innerHTML = '';
+            addRow(); addRow();
+        }
+        function updCnt() {
+            document.getElementById('cnt').textContent = JSON.parse(localStorage.getItem('my_recs') || '[]').length;
+        }
+        function dlImg() {
+            html2canvas(document.getElementById('inv-card')).then(c => {
+                let a = document.createElement('a'); a.download = 'invoice.png'; a.href = c.toDataURL(); a.click();
+            });
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('date').textContent = new Date().toLocaleDateString('ar-EG');
+            addRow(); addRow(); updCnt();
+        });
+    </script>
+</body>
+</html>
